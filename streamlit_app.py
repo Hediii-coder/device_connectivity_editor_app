@@ -1,9 +1,10 @@
 import streamlit as st
 import json
 import os
-import shutil
 import base64
 from io import StringIO
+from copy import deepcopy
+import pandas as pd
 
 NAME_MAPPING = "name_mapping.json"
 OUTPUT_FILE = "updated_output.json"
@@ -43,11 +44,10 @@ if not uploaded_file:
 
 try:
     stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
-    data = load_json(stringio)
+    original_data = load_json(stringio)
 except Exception as e:
     st.error(f"Error reading uploaded file: {e}")
     st.stop()
-
 
 if not os.path.exists(NAME_MAPPING):
     st.error(f"Could not find name mapping file: {NAME_MAPPING}")
@@ -59,36 +59,75 @@ except Exception as e:
     st.error(f"Error loading service name mapping: {e}")
     st.stop()
 
-service_keys = sorted({b['serviceKey'] for b in data})
-selected_key = st.selectbox("Select a Service Key to Edit", service_keys)
-bouquet = find_bouquet(data, selected_key)
 
-if not bouquet:
+if "edited_data" not in st.session_state:
+    st.session_state.edited_data = deepcopy(original_data)
+
+if "changes_log" not in st.session_state:
+    st.session_state.changes_log = []
+
+service_keys = sorted({b['serviceKey'] for b in original_data})
+selected_key = st.selectbox("Select a Service Key to Edit", service_keys)
+edited_bouquet = find_bouquet(st.session_state.edited_data, selected_key)
+original_bouquet = find_bouquet(original_data, selected_key)
+service_name = name_map.get(selected_key, "Unknown service")
+
+if not edited_bouquet:
     st.warning("No entry was found for the selected service key.")
     st.stop()
 
-service_t = name_map.get(selected_key, "Unknown service")
-st.subheader(f"Editing Devices for Service Key: {selected_key} - {service_t}")
+st.subheader(f"Editing Devices for Service Key: {selected_key} - {service_name}")
 
-updated_devices = []
-for device in bouquet["devices"]:
+for i, device in enumerate(edited_bouquet["devices"]):
     with st.expander(f"{device['deviceType']} - {device['devicePlatform']}"):
         current = device.get("deviceConnectivity", [])
         new_connectivity = st.multiselect(
             "Connectivity options", 
             ["IPTV", "SATELLITE"], 
             default=current, 
-            key=f"{device['deviceType']}_{device['devicePlatform']}"
+            key=f"{selected_key}_{device['deviceType']}_{device['devicePlatform']}_{i}"
         )
-        device["deviceConnectivity"] = new_connectivity
-        updated_devices.append(device)
+
+        if set(current) != set(new_connectivity):
+            device["deviceConnectivity"] = new_connectivity
+
+            already_logged = any(
+                log["Service Key"] == selected_key and
+                log["Device Type"] == device["deviceType"] and
+                log["Platform"] == device["devicePlatform"]
+                for log in st.session_state.changes_log
+            )
+
+            if not already_logged:
+                old_device = next(
+                    (d for d in original_bouquet["devices"]
+                     if d["deviceType"] == device["deviceType"] and d["devicePlatform"] == device["devicePlatform"]),
+                    None
+                )
+                old_conn = old_device.get("deviceConnectivity", []) if old_device else []
+                st.session_state.changes_log.append({
+                    "Service Key": selected_key,
+                    "Service Name": service_name,
+                    "Device Type": device["deviceType"],
+                    "Platform": device["devicePlatform"],
+                    "Old Connectivity": ", ".join(old_conn),
+                    "New Connectivity": ", ".join(new_connectivity)
+                })
 
 if st.button("Save Changes", icon="💾"):
     try:
-        save_json(OUTPUT_FILE, data)
-        st.success(f"Changes saved to {OUTPUT_FILE}")
-        if updated_devices:
-           st.markdown(file_download_link(OUTPUT_FILE, "Click here to download the updated file"), unsafe_allow_html=True)
+        save_json(OUTPUT_FILE, st.session_state.edited_data)
+        st.success(f"All changes saved to {OUTPUT_FILE}")
+        st.markdown(file_download_link(OUTPUT_FILE, "Download updated JSON file"), unsafe_allow_html=True)
+        if st.session_state.changes_log:
+            st.subheader("Changed Devices")
+            df = pd.DataFrame(st.session_state.changes_log)
+            st.dataframe(df, use_container_width=True)
+            
+        else:
+            st.info("No changes detected across service keys.")
+
     except Exception as e:
         st.error(f"Error saving file: {e}")
+
 
