@@ -2,14 +2,26 @@ import streamlit as st
 import json
 import os
 import base64
-from io import StringIO
 from copy import deepcopy
 import pandas as pd
-
 
 NAME_MAPPING = "name_mapping.json"
 OUTPUT_FILE = "updated_output.json"
 
+DEFAULT_DEVICES = [
+    {"provider": "SKY", "deviceType": "SETTOPBOX", "devicePlatform": "AMIDALA", "deviceConnectivity": []},
+    {"provider": "SKY", "deviceType": "MOBILE", "devicePlatform": "IOS", "deviceConnectivity": []},
+    {"provider": "SKY", "deviceType": "MOBILE", "devicePlatform": "ANDROID", "deviceConnectivity": []},
+    {"provider": "SKY", "deviceType": "COMPUTER", "devicePlatform": "PC", "deviceConnectivity": []},
+    {"provider": "SKY", "deviceType": "COMPUTER", "devicePlatform": "MAC", "deviceConnectivity": []},
+    {"provider": "SKY", "deviceType": "TABLET", "devicePlatform": "IOS", "deviceConnectivity": []},
+    {"provider": "SKY", "deviceType": "TABLET", "devicePlatform": "ANDROID", "deviceConnectivity": []},
+    {"provider": "SKY", "deviceType": "CONSOLE", "devicePlatform": "XBOX", "deviceConnectivity": []},
+    {"provider": "SKY", "deviceType": "CONSOLE", "devicePlatform": "PLAYSTATION", "deviceConnectivity": []},
+    {"provider": "SKY", "deviceType": "TV", "devicePlatform": "LG", "deviceConnectivity": []},
+    {"provider": "SKY", "deviceType": "TV", "devicePlatform": "SAMSUNG", "deviceConnectivity": []},
+    {"provider": "SKY", "deviceType": "IPSETTOPBOX", "devicePlatform": "APPLETV", "deviceConnectivity": []},
+]
 
 def load_json(file_obj):
     return json.load(file_obj)
@@ -35,24 +47,19 @@ def file_download_link(file_path, label):
     href = f'<a href="data:application/json;base64,{b64}" download="{file_path}">{label}</a>'
     return href
 
-
 st.set_page_config(page_title="Device Connectivity Manager", page_icon="sky.png", layout="wide")
-st.title("📡 Device Connectivity Editor")
-
+st.title("📡 Device Connectivity Manager")
 
 uploaded_file = st.file_uploader("Upload a Bouquet JSON File", type=["json"])
 if not uploaded_file:
     st.warning("Please upload a JSON file to proceed.")
     st.stop()
 
-
 try:
-    stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
-    original_data = load_json(stringio)
+    original_data = load_json(uploaded_file)
 except Exception as e:
     st.error(f"Error reading uploaded file: {e}")
     st.stop()
-
 
 if not os.path.exists(NAME_MAPPING):
     st.error(f"Could not find name mapping file: {NAME_MAPPING}")
@@ -64,102 +71,109 @@ except Exception as e:
     st.error(f"Error loading service name mapping: {e}")
     st.stop()
 
-
 if "edited_data" not in st.session_state:
     st.session_state.edited_data = deepcopy(original_data)
-
 if "temp_edits" not in st.session_state:
     st.session_state.temp_edits = {}
+if "page" not in st.session_state:
+    st.session_state.page = "Edit"
 
+page = st.sidebar.radio("Navigation", ["Edit", "Add", "Delete"])
 
-service_keys = sorted({b['serviceKey'] for b in original_data})
-selected_key = st.selectbox("Select a Service Key to Edit", service_keys)
-service_name = name_map.get(selected_key, "Unknown service")
+if page == "Edit":
+    service_keys = sorted(set(b['serviceKey'] for b in st.session_state.edited_data) | set(st.session_state.temp_edits.keys()))
+    selected_key = st.selectbox("Select a Service Key to Edit", service_keys)
+    service_name = name_map.get(selected_key, "Unknown service")
 
+    if selected_key not in st.session_state.temp_edits:
+        bouquet = find_bouquet(st.session_state.edited_data, selected_key)
+        if bouquet:
+            st.session_state.temp_edits[selected_key] = deepcopy(bouquet)
 
-edited_bouquet = find_bouquet(st.session_state.edited_data, selected_key)
-original_bouquet = find_bouquet(original_data, selected_key)
+    bouquet = st.session_state.temp_edits[selected_key]
+    st.subheader(f"Editing Devices for Service Key: {selected_key} - {service_name}")
+    
+    for i, device in enumerate(bouquet["devices"]):
+        widget_key = f"{selected_key}_{device['deviceType']}_{device['devicePlatform']}_{i}"
+        with st.expander(f"{device['deviceType']} - {device['devicePlatform']}"):
+            new_val = st.multiselect("Connectivity", ["IPTV", "SATELLITE"], default=device["deviceConnectivity"], key=widget_key)
+            device["deviceConnectivity"] = new_val
 
-if not edited_bouquet:
-    st.warning("No entry was found for the selected service key.")
-    st.stop()
+    if st.button("💾 Save Changes"):
+        for key, val in st.session_state.temp_edits.items():
+            existing = find_bouquet(st.session_state.edited_data, key)
+            if existing:
+                existing["devices"] = deepcopy(val["devices"])
+            else:
+                st.session_state.edited_data.append(deepcopy(val))
 
-st.subheader(f"Editing Devices for Service Key: {selected_key} - {service_name}")
-
-
-if selected_key not in st.session_state.temp_edits:
-    st.session_state.temp_edits[selected_key] = deepcopy(edited_bouquet)
-
-
-temp_bouquet = st.session_state.temp_edits[selected_key]
-
-
-for i, device in enumerate(temp_bouquet["devices"]):
-    device_type = device["deviceType"]
-    platform = device["devicePlatform"]
-    widget_key = f"{selected_key}_{device_type}_{platform}_{i}"
-
-    with st.expander(f"{device_type} - {platform}"):
-        current_value = device.get("deviceConnectivity", [])
-        new_value = st.multiselect(
-            "Connectivity options",
-            ["IPTV", "SATELLITE"],
-            default=current_value,
-            key=widget_key
-        )
-        device["deviceConnectivity"] = new_value
-
-
-if st.button("Save Changes", icon="💾"):
-    try:
-        
-        for service_key, updated_bouquet in st.session_state.temp_edits.items():
-            main_bouquet = find_bouquet(st.session_state.edited_data, service_key)
-            if main_bouquet:
-                main_bouquet["devices"] = deepcopy(updated_bouquet["devices"])
-
-        
         save_json(OUTPUT_FILE, st.session_state.edited_data)
-        st.success(f"All changes saved to {OUTPUT_FILE}")
-        st.markdown(file_download_link(OUTPUT_FILE, "Download updated JSON file"), unsafe_allow_html=True)
+        st.success("Changes saved!")
+        st.markdown(file_download_link(OUTPUT_FILE, "Download updated JSON"), unsafe_allow_html=True)
 
         
-        with open(OUTPUT_FILE, 'r') as f:
-            updated_data = json.load(f)
-
         change_log = []
-        for original_entry in original_data:
-            updated_entry = find_bouquet(updated_data, original_entry["serviceKey"])
-            if not updated_entry:
-                continue
+        existing_keys = {entry["serviceKey"] for entry in original_data}
 
-            for orig_device in original_entry.get("devices", []):
-                matching_device = next(
-                    (d for d in updated_entry.get("devices", [])
-                     if d["deviceType"] == orig_device["deviceType"]
-                     and d["devicePlatform"] == orig_device["devicePlatform"]),
-                    None
-                )
-                if matching_device:
-                    old_conn = set(orig_device.get("deviceConnectivity", []))
-                    new_conn = set(matching_device.get("deviceConnectivity", []))
-                    if old_conn != new_conn:
-                        change_log.append({
-                            "Service Key": original_entry["serviceKey"],
-                            "Service Name": name_map.get(original_entry["serviceKey"], "Unknown service"),
-                            "Device Type": orig_device["deviceType"],
-                            "Platform": orig_device["devicePlatform"],
-                            "Old Connectivity": ", ".join(sorted(old_conn)),
-                            "New Connectivity": ", ".join(sorted(new_conn))
-                        })
+        for entry in st.session_state.edited_data:
+            key = entry["serviceKey"]
+            service_name = name_map.get(key, "Unknown")
+            if key not in existing_keys:
+                for device in entry.get("devices", []):
+                    change_log.append({
+                        "Service Key": key,
+                        "Service Name": service_name,
+                        "Device Type": device["deviceType"],
+                        "Platform": device["devicePlatform"],
+                        "Old Connectivity": "N/A",
+                        "New Connectivity": ", ".join(device.get("deviceConnectivity", [])),
+                    })
+            else:
+                original_entry = find_bouquet(original_data, key)
+                for orig_device in original_entry.get("devices", []):
+                    match = next((d for d in entry.get("devices", []) if d["deviceType"] == orig_device["deviceType"] and d["devicePlatform"] == orig_device["devicePlatform"]), None)
+                    if match:
+                        old_conn = set(orig_device.get("deviceConnectivity", []))
+                        new_conn = set(match.get("deviceConnectivity", []))
+                        if old_conn != new_conn:
+                            change_log.append({
+                                "Service Key": key,
+                                "Service Name": service_name,
+                                "Device Type": orig_device["deviceType"],
+                                "Platform": orig_device["devicePlatform"],
+                                "Old Connectivity": ", ".join(old_conn),
+                                "New Connectivity": ", ".join(new_conn),
+                            })
 
         if change_log:
-            st.subheader("Changed Devices (Based on File Comparison)")
-            df = pd.DataFrame(change_log)
-            st.dataframe(df, use_container_width=True)
-        else:
-            st.info("No changes detected in saved file.")
+            st.subheader("Changed Devices")
+            st.dataframe(pd.DataFrame(change_log))
 
-    except Exception as e:
-        st.error(f"Error saving or comparing file: {e}")
+elif page == "Add":
+    st.subheader("Add New Service Key")
+    new_key = st.text_input("Enter New Service Key")
+    if st.button("Add Service Key"):
+        if new_key in {b['serviceKey'] for b in st.session_state.edited_data} or new_key in st.session_state.temp_edits:
+            st.warning("Service Key already exists.")
+        else:
+            new_entry = {
+                "bouquetId": "4",
+                "subBouquetId": "0",
+                "serviceKey": new_key,
+                "devices": deepcopy(DEFAULT_DEVICES)
+            }
+            st.session_state.temp_edits[new_key] = new_entry
+            st.success(f"Service Key {new_key} added! Now switch to 'Edit' page to modify.")
+            st.session_state.page = "Edit"
+
+elif page == "Delete":
+    st.subheader("Delete Service Key")
+    all_keys = sorted(set(b['serviceKey'] for b in st.session_state.edited_data) | set(st.session_state.temp_edits.keys()))
+    to_delete = st.selectbox("Choose Service Key to Delete", all_keys)
+    if st.button("Delete Selected Key"):
+        st.session_state.edited_data = [b for b in st.session_state.edited_data if b['serviceKey'] != to_delete]
+        st.session_state.temp_edits.pop(to_delete, None)
+        save_json(OUTPUT_FILE, st.session_state.edited_data)
+        st.success(f"Service Key {to_delete} deleted.")
+        st.markdown(file_download_link(OUTPUT_FILE, "Download updated JSON"), unsafe_allow_html=True)
 
