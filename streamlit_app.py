@@ -152,21 +152,33 @@ if page == "Edit":
 elif page == "Add":
     st.subheader("Add New Service Key")
     new_key = st.text_input("Enter New Service Key")
-    if st.button("Add Service Key"):
+
+    if new_key:
         if new_key in {b['serviceKey'] for b in st.session_state.edited_data} or new_key in st.session_state.temp_edits:
             st.warning("Service Key already exists.")
         else:
-            ref_entry = st.session_state.edited_data[0]
+            if "add_device_temp" not in st.session_state:
+                st.session_state.add_device_temp = deepcopy(DEFAULT_DEVICES)
+            st.subheader("Set Connectivity for Default Devices")
+            for i, device in enumerate(st.session_state.add_device_temp):
+                widget_key = f"add_{device['deviceType']}_{device['devicePlatform']}_{i}"
+                with st.expander(f"{device['deviceType']} - {device['devicePlatform']}"):
+                    conn = st.multiselect("Connectivity", ["IPTV", "SATELLITE"], default=device["deviceConnectivity"], key=widget_key)
+                    st.session_state.add_device_temp[i]["deviceConnectivity"] = conn
 
-            new_entry = {
-                "bouquetId": ref_entry["bouquetId"],
-                "subBouquetId": ref_entry["subBouquetId"],
-                "serviceKey": new_key,
-                "devices": deepcopy(DEFAULT_DEVICES)
-            }
-            st.session_state.temp_edits[new_key] = new_entry
-            st.success(f"Service Key {new_key} added! Now switch to 'Edit' page to modify.")
-            st.session_state.page = "Edit"
+            if st.button("Confirm and Add Service Key"):
+                ref_entry = st.session_state.edited_data[0]
+                new_entry = {
+                    "bouquetId": ref_entry["bouquetId"],
+                    "subBouquetId": ref_entry["subBouquetId"],
+                    "serviceKey": new_key,
+                    "devices": deepcopy(st.session_state.add_device_temp)
+                }
+                st.session_state.temp_edits[new_key] = new_entry
+                del st.session_state.add_device_temp 
+                st.success(f"Service Key {new_key} added! Now switch to 'Edit' page to make further changes if needed.")
+                st.session_state.page = "Edit"
+
 
 elif page == "Delete":
     st.subheader("Delete Service Key")
@@ -178,4 +190,5 @@ elif page == "Delete":
         save_json(OUTPUT_FILE, st.session_state.edited_data)
         st.success(f"Service Key {to_delete} deleted.")
         st.markdown(file_download_link(OUTPUT_FILE, "Download updated JSON"), unsafe_allow_html=True)
+
 
