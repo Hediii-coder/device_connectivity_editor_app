@@ -69,7 +69,6 @@ st.title("📡 Device Connectivity Manager")
 
 uploaded_file = st.file_uploader("Upload a Bouquet JSON File", type=["json"])
 
-
 if "last_uploaded_filename" not in st.session_state:
     st.session_state.last_uploaded_filename = None
 
@@ -84,6 +83,8 @@ if not uploaded_file:
     autosaved = load_autosave()
     if autosaved:
         st.info("Restored session from autosave (no uploaded file found).")
+        if "initial_data" not in st.session_state:
+            st.session_state.initial_data = deepcopy(autosaved)
         original_data = deepcopy(autosaved)
     else:
         st.warning("Please upload a JSON file to proceed.")
@@ -91,6 +92,8 @@ if not uploaded_file:
 else:
     try:
         original_data = load_json(uploaded_file)
+        if "initial_data" not in st.session_state:
+            st.session_state.initial_data = deepcopy(original_data)
     except Exception as e:
         st.error(f"Error reading uploaded file: {e}")
         st.stop()
@@ -147,7 +150,8 @@ if page == "Edit":
         st.markdown(file_download_link(OUTPUT_FILE, "Download updated JSON"), unsafe_allow_html=True)
 
         change_log = []
-        existing_keys = {entry["serviceKey"] for entry in original_data}
+        initial_data = st.session_state.initial_data
+        existing_keys = {entry["serviceKey"] for entry in initial_data}
 
         for entry in st.session_state.edited_data:
             key = entry["serviceKey"]
@@ -163,7 +167,7 @@ if page == "Edit":
                         "New Connectivity": ", ".join(device.get("deviceConnectivity", [])),
                     })
             else:
-                original_entry = find_bouquet(original_data, key)
+                original_entry = find_bouquet(initial_data, key)
                 for orig_device in original_entry.get("devices", []):
                     match = next((d for d in entry.get("devices", []) if d["deviceType"] == orig_device["deviceType"] and d["devicePlatform"] == orig_device["devicePlatform"]), None)
                     if match:
@@ -194,20 +198,19 @@ elif page == "Add":
             if "add_device_temp" not in st.session_state:
                 st.session_state.add_device_temp = deepcopy(DEFAULT_DEVICES)
             st.subheader("Set Connectivity for Default Devices")
-            col1,col2,col3 = st.columns([1,1,1])
+            col1, col2, col3 = st.columns([1, 1, 1])
             with col1:
-                if st.button ("Autofill All with IPTV"):
+                if st.button("Autofill All with IPTV"):
                     for device in st.session_state.add_device_temp:
-                        device["deviceConnectivity"]=["IPTV"]
-            with col2: 
-                if st.button ("Autofill All with SATELLITE"):
+                        device["deviceConnectivity"] = ["IPTV"]
+            with col2:
+                if st.button("Autofill All with SATELLITE"):
                     for device in st.session_state.add_device_temp:
                         device["deviceConnectivity"] = ["SATELLITE"]
             with col3:
-                if st.button ("Autofill All with SATELLITE & IPTV"):
+                if st.button("Autofill All with SATELLITE & IPTV"):
                     for device in st.session_state.add_device_temp:
                         device["deviceConnectivity"] = ["SATELLITE", "IPTV"]
-    
 
             for i, device in enumerate(st.session_state.add_device_temp):
                 widget_key = f"add_{device['deviceType']}_{device['devicePlatform']}_{i}"
@@ -224,11 +227,9 @@ elif page == "Add":
                     "devices": deepcopy(st.session_state.add_device_temp)
                 }
                 st.session_state.temp_edits[new_key] = new_entry
-                del st.session_state.add_device_temp 
+                del st.session_state.add_device_temp
                 st.success(f"Service Key {new_key} added! Now switch to 'Edit' page to make further changes if needed.")
                 st.session_state.page = "Edit"
-
-               
                 st.session_state.edited_data.append(deepcopy(new_entry))
                 autosave_session(st.session_state.edited_data)
 
@@ -243,5 +244,6 @@ elif page == "Delete":
         autosave_session(st.session_state.edited_data)
         st.success(f"Service Key {to_delete} deleted.")
         st.markdown(file_download_link(OUTPUT_FILE, "Download updated JSON"), unsafe_allow_html=True)
+
 
 
