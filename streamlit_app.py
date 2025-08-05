@@ -7,6 +7,7 @@ import pandas as pd
 
 NAME_MAPPING = "name_mapping.json"
 OUTPUT_FILE = "updated_output.json"
+AUTOSAVE_FILE = "autosave.json"
 
 DEFAULT_DEVICES = [
     {"provider": "SKY", "deviceType": "SETTOPBOX", "devicePlatform": "AMIDALA", "deviceConnectivity": []},
@@ -47,19 +48,52 @@ def file_download_link(file_path, label):
     href = f'<a href="data:application/json;base64,{b64}" download="{file_path}">{label}</a>'
     return href
 
+def autosave_session(data):
+    try:
+        with open(AUTOSAVE_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        st.error(f"Autosave failed: {e}")
+
+def load_autosave():
+    if os.path.exists(AUTOSAVE_FILE):
+        try:
+            with open(AUTOSAVE_FILE, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            st.warning(f"Failed to load autosave: {e}")
+    return None
+
 st.set_page_config(page_title="Device Connectivity Manager", page_icon="sky.png", layout="wide")
 st.title("📡 Device Connectivity Manager")
 
 uploaded_file = st.file_uploader("Upload a Bouquet JSON File", type=["json"])
-if not uploaded_file:
-    st.warning("Please upload a JSON file to proceed.")
-    st.stop()
 
-try:
-    original_data = load_json(uploaded_file)
-except Exception as e:
-    st.error(f"Error reading uploaded file: {e}")
-    st.stop()
+
+if "last_uploaded_filename" not in st.session_state:
+    st.session_state.last_uploaded_filename = None
+
+if uploaded_file and uploaded_file.name != st.session_state.last_uploaded_filename:
+    if os.path.exists(AUTOSAVE_FILE):
+        os.remove(AUTOSAVE_FILE)
+    st.session_state.clear()
+    st.session_state.last_uploaded_filename = uploaded_file.name
+    st.markdown("<script>window.location.reload(true);</script>", unsafe_allow_html=True)
+
+if not uploaded_file:
+    autosaved = load_autosave()
+    if autosaved:
+        st.info("Restored session from autosave (no uploaded file found).")
+        original_data = deepcopy(autosaved)
+    else:
+        st.warning("Please upload a JSON file to proceed.")
+        st.stop()
+else:
+    try:
+        original_data = load_json(uploaded_file)
+    except Exception as e:
+        st.error(f"Error reading uploaded file: {e}")
+        st.stop()
 
 if not os.path.exists(NAME_MAPPING):
     st.error(f"Could not find name mapping file: {NAME_MAPPING}")
@@ -108,10 +142,10 @@ if page == "Edit":
                 st.session_state.edited_data.append(deepcopy(val))
 
         save_json(OUTPUT_FILE, st.session_state.edited_data)
+        autosave_session(st.session_state.edited_data)
         st.success("Changes saved!")
         st.markdown(file_download_link(OUTPUT_FILE, "Download updated JSON"), unsafe_allow_html=True)
 
-        
         change_log = []
         existing_keys = {entry["serviceKey"] for entry in original_data}
 
@@ -160,6 +194,21 @@ elif page == "Add":
             if "add_device_temp" not in st.session_state:
                 st.session_state.add_device_temp = deepcopy(DEFAULT_DEVICES)
             st.subheader("Set Connectivity for Default Devices")
+            col1,col2,col3 = st.columns([1,1,1])
+            with col1:
+                if st.button ("Autofill All with IPTV"):
+                    for device in st.session_state.add_device_temp:
+                        device["deviceConnectivity"]=["IPTV"]
+            with col2: 
+                if st.button ("Autofill All with SATELLITE"):
+                    for device in st.session_state.add_device_temp:
+                        device["deviceConnectivity"] = ["SATELLITE"]
+            with col3:
+                if st.button ("Autofill All with SATELLITE & IPTV"):
+                    for device in st.session_state.add_device_temp:
+                        device["deviceConnectivity"] = ["SATELLITE", "IPTV"]
+    
+
             for i, device in enumerate(st.session_state.add_device_temp):
                 widget_key = f"add_{device['deviceType']}_{device['devicePlatform']}_{i}"
                 with st.expander(f"{device['deviceType']} - {device['devicePlatform']}"):
@@ -179,6 +228,9 @@ elif page == "Add":
                 st.success(f"Service Key {new_key} added! Now switch to 'Edit' page to make further changes if needed.")
                 st.session_state.page = "Edit"
 
+               
+                st.session_state.edited_data.append(deepcopy(new_entry))
+                autosave_session(st.session_state.edited_data)
 
 elif page == "Delete":
     st.subheader("Delete Service Key")
@@ -188,6 +240,7 @@ elif page == "Delete":
         st.session_state.edited_data = [b for b in st.session_state.edited_data if b['serviceKey'] != to_delete]
         st.session_state.temp_edits.pop(to_delete, None)
         save_json(OUTPUT_FILE, st.session_state.edited_data)
+        autosave_session(st.session_state.edited_data)
         st.success(f"Service Key {to_delete} deleted.")
         st.markdown(file_download_link(OUTPUT_FILE, "Download updated JSON"), unsafe_allow_html=True)
 
