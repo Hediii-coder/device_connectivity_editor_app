@@ -190,6 +190,7 @@ if page == "Edit":
 elif page == "Add":
     st.subheader("Add New Service Key")
     new_key = st.text_input("Enter New Service Key")
+    new_channel_name = st.text_input("Enter Channel Name for This Service Key")  # <-- new field
 
     if new_key:
         if new_key in {b['serviceKey'] for b in st.session_state.edited_data} or new_key in st.session_state.temp_edits:
@@ -219,19 +220,38 @@ elif page == "Add":
                     st.session_state.add_device_temp[i]["deviceConnectivity"] = conn
 
             if st.button("Confirm and Add Service Key"):
-                ref_entry = st.session_state.edited_data[0]
-                new_entry = {
-                    "bouquetId": ref_entry["bouquetId"],
-                    "subBouquetId": ref_entry["subBouquetId"],
-                    "serviceKey": new_key,
-                    "devices": deepcopy(st.session_state.add_device_temp)
-                }
-                st.session_state.temp_edits[new_key] = new_entry
-                del st.session_state.add_device_temp
-                st.success(f"Service Key {new_key} added! Now switch to 'Edit' page to make further changes if needed.")
-                st.session_state.page = "Edit"
-                st.session_state.edited_data.append(deepcopy(new_entry))
-                autosave_session(st.session_state.edited_data)
+                if not new_channel_name.strip():
+                    st.error("Please enter a channel name before adding.")
+                else:
+                 
+                    ref_entry = st.session_state.edited_data[0]
+                    new_entry = {
+                        "bouquetId": ref_entry["bouquetId"],
+                        "subBouquetId": ref_entry["subBouquetId"],
+                        "serviceKey": new_key,
+                        "devices": deepcopy(st.session_state.add_device_temp)
+                    }
+                    st.session_state.temp_edits[new_key] = new_entry
+                    del st.session_state.add_device_temp
+                    st.session_state.page = "Edit"
+                    st.session_state.edited_data.append(deepcopy(new_entry))
+                    autosave_session(st.session_state.edited_data)
+
+                
+                    try:
+                        with open(NAME_MAPPING, "r") as f:
+                            name_data = json.load(f)
+                        name_data["services"].append({
+                            "sid": str(new_key),
+                            "t": new_channel_name.strip(),
+                            "sk": int(new_key)
+                        })
+                        with open(NAME_MAPPING, "w") as f:
+                            json.dump(name_data, f, indent=2)
+                        st.success(f"Service Key {new_key} and channel '{new_channel_name}' added successfully!")
+                    except Exception as e:
+                        st.error(f"Failed to update name mapping file: {e}")
+
 
 elif page == "Delete":
     st.subheader("Delete Service Key")
